@@ -462,42 +462,59 @@
             }
         }
 
+        window.refreshLeaderboard = async function() {
+            const icon = document.querySelector('button[onclick="refreshLeaderboard()"] i');
+            if(icon) icon.classList.add('fa-spin');
+            await syncCloudData(true);
+            const lbContainer = document.getElementById('leaderboard-container');
+            if(lbContainer) lbContainer.innerHTML = getLeaderboardHtml();
+        };
+
         function getLeaderboardHtml() {
             const localRecs = safeStorage.get('hkuga_science_scores_t1') || [];
-            const cloudRecs = window.cloudRecords || [];
+            const cloudRecs = Array.isArray(window.cloudRecords) ? window.cloudRecords : [];
             const allRecs = [...localRecs, ...cloudRecs];
             
             if (allRecs.length === 0) return '';
             
             const uniqueMap = new Map();
+            let classStats = {};
+            
+            // First pass: Count EVERY single attempt for volume
             allRecs.forEach(r => {
-                const key = `${r.classId}_${r.studentNum}_${r.articleId}`;
-                if (!uniqueMap.has(key) || r.score > uniqueMap.get(key).score) {
+                if(!r.classId) return;
+                let cId = String(r.classId).toUpperCase();
+                if (!classStats[cId]) classStats[cId] = { score: 0, total: 0, attempts: 0 };
+                classStats[cId].attempts += 1;
+                
+                // Track only the highest score for accuracy math
+                const key = `${cId}_${r.studentNum}_${r.articleId}`;
+                if (!uniqueMap.has(key) || (Number(r.score) || 0) > (Number(uniqueMap.get(key).score) || 0)) {
                     uniqueMap.set(key, r);
                 }
             });
             
-            let classStats = {};
+            // Second pass: Calculate accuracy using only their best scores
             uniqueMap.forEach(r => {
-                if(!r.classId) return;
                 let cId = String(r.classId).toUpperCase();
-                if (!classStats[cId]) classStats[cId] = { score: 0, total: 0, students: new Set() };
-                classStats[cId].score += r.score;
-                classStats[cId].total += r.total;
-                classStats[cId].students.add(r.studentNum);
+                classStats[cId].score += (Number(r.score) || 0);
+                classStats[cId].total += (Number(r.total) || 0);
             });
             
             let lb = Object.keys(classStats).map(c => ({
                 id: c,
-                acc: Math.round((classStats[c].score / classStats[c].total) * 100) || 0,
-                active: classStats[c].students.size
+                acc: classStats[c].total > 0 ? Math.round((classStats[c].score / classStats[c].total) * 100) : 0,
+                attempts: classStats[c].attempts
             })).sort((a,b) => b.acc - a.acc);
             
             if (lb.length === 0) return '';
             
             let html = `<div class="bg-gradient-to-tr from-slate-900 to-indigo-900 rounded-3xl p-8 mb-8 shadow-2xl border border-white/10 text-white relative overflow-hidden">
                 <div class="absolute top-0 right-0 w-64 h-64 bg-blue-500 rounded-full mix-blend-overlay filter blur-3xl opacity-20"></div>
-                <h3 class="text-2xl font-black mb-6 flex items-center"><i class="fa-solid fa-trophy text-yellow-400 mr-3"></i> Inter-Class Cup</h3>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 relative z-10 gap-4">
+                    <h3 class="text-2xl font-black flex items-center"><i class="fa-solid fa-trophy text-yellow-400 mr-3"></i> Inter-Class Cup</h3>
+                    <button onclick="refreshLeaderboard()" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center shadow-sm"><i class="fa-solid fa-arrows-rotate mr-2"></i> Refresh Live</button>
+                </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10">`;
                 
             lb.slice(0, 6).forEach((cls, idx) => {
@@ -512,7 +529,7 @@
                             `<span class="text-xl font-black opacity-60 w-8 text-center inline-block">#${idx + 1}</span>`;
                 
                 html += `<div class="rounded-2xl p-4 border ${colors} backdrop-blur-sm flex items-center justify-between transition-all hover:bg-white/10">
-                    <div class="flex items-center"><div class="text-3xl mr-3 flex justify-center items-center">${medal}</div><div><div class="font-black text-xl">${cls.id}</div><div class="text-xs opacity-70">${cls.active} Active Students</div></div></div>
+                    <div class="flex items-center"><div class="text-3xl mr-4 flex justify-center items-center">${medal}</div><div><div class="font-black text-xl">${cls.id}</div><div class="text-xs opacity-80 mt-0.5"><i class="fa-solid fa-pen-nib mr-1"></i> ${cls.attempts} Quiz Attempts</div></div></div>
                     <div class="text-3xl font-black">${cls.acc}%</div>
                 </div>`;
             });
@@ -1274,8 +1291,8 @@
                 return Number(a.studentNum) - Number(b.studentNum);
             });
             
-            let csv = "Class,Number,Name,Articles Completed,Total Points,Quiz Accuracy %\n" + 
-                      filtered.map(s => `${s.classId},${s.studentNum},"${s.name}",${s.completed},${s.totalPoints},${s.accuracy}`).join("\n");
+            let csv = "Class,Number,Name,Articles Completed,Overall Accuracy %\n" + 
+                      filtered.map(s => `${s.classId},${s.studentNum},"${s.name}",${s.completed},${s.accuracy}`).join("\n");
                       
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a"); 
@@ -1312,11 +1329,6 @@
             let totalPossible = 0;
             let totalScore = 0;
             
-            // Calculate global total questions available in the term
-            let globalTotalQuestions = 0;
-            Object.values(scienceData).forEach(m => m.articles.forEach(a => globalTotalQuestions += a.quiz.length));
-            window.globalTotalQuestions = globalTotalQuestions;
-            
             recs.forEach(r => {
                 let sKey = `${r.classId}_${r.studentNum}_${r.name}`;
                 if(!studentMap.has(sKey)) studentMap.set(sKey, { name: r.name, classId: r.classId, studentNum: r.studentNum, articles: new Map() });
@@ -1345,7 +1357,6 @@
                 let acc = sPos > 0 ? Math.round((sTotal/sPos)*100) : 0;
                 s.accuracy = acc;
                 s.completed = s.articles.size;
-                s.totalPoints = sTotal; // Store the raw total points
                 finalStudentsList.push(s);
                 
                 if(acc < 50 && s.completed > 0) {
@@ -1384,7 +1395,7 @@
 
                 let tbody = document.getElementById('t-body');
                 if(filtered.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-500 font-bold">No students match this filter.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-500 font-bold">No students match this filter.</td></tr>`;
                     return;
                 }
 
@@ -1394,7 +1405,6 @@
                         <td class="px-6 py-4 border-b font-black text-gray-800">${s.name}</td>
                         <td class="px-6 py-4 border-b text-gray-600 font-bold">${s.classId}-${s.studentNum}</td>
                         <td class="px-6 py-4 border-b"><span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-black border border-blue-200 shadow-sm">${s.completed} / 16</span></td>
-                        <td class="px-6 py-4 border-b font-black text-lg text-yellow-600">${s.totalPoints} <span class="text-sm text-gray-400">/ ${window.globalTotalQuestions}</span></td>
                         <td class="px-6 py-4 border-b font-black text-lg ${badgeColor}">${s.accuracy}%</td>
                     </tr>`;
                 }).join('');
@@ -1427,28 +1437,27 @@
                             <input type="text" id="filter-search" onkeyup="renderTeacherTable()" placeholder="Search by name or number..." class="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-white focus:border-blue-400 outline-none font-bold text-gray-700 shadow-sm bg-white/80">
                         </div>
                         <select id="filter-class" onchange="renderTeacherTable()" class="px-6 py-3 rounded-xl border-2 border-white focus:border-blue-400 outline-none font-bold text-gray-700 shadow-sm bg-white/80 cursor-pointer">
-                        <option value="">All Classes</option>
-                        <option value="s2h">S2H</option><option value="s2k">S2K</option><option value="s2u">S2U</option><option value="s2g">S2G</option><option value="s2a">S2A</option><option value="s2c">S2C</option>
-                    </select>
+                            <option value="">All Classes</option>
+                            <option value="s2h">S2H</option><option value="s2k">S2K</option><option value="s2u">S2U</option><option value="s2g">S2G</option><option value="s2a">S2A</option><option value="s2c">S2C</option>
+                        </select>
+                    </div>
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-900 text-white border-b-4 border-slate-700">
+                            <tr>
+                                <th class="px-6 py-5 text-lg font-black">Name</th>
+                                <th class="px-6 py-5 text-lg font-black">Class-No</th>
+                                <th class="px-6 py-5 text-lg font-black">Articles Finished</th>
+                                <th class="px-6 py-5 text-lg font-black">Overall Accuracy</th>
+                            </tr>
+                        </thead>
+                        <tbody id="t-body"></tbody>
+                    </table>
                 </div>
-                <table class="w-full text-left">
-                    <thead class="bg-slate-900 text-white border-b-4 border-slate-700">
-                        <tr>
-                            <th class="px-6 py-5 text-lg font-black">Name</th>
-                            <th class="px-6 py-5 text-lg font-black">Class-No</th>
-                            <th class="px-6 py-5 text-lg font-black">Articles Finished</th>
-                            <th class="px-6 py-5 text-lg font-black text-yellow-300">Total Points</th>
-                            <th class="px-6 py-5 text-lg font-black">Quiz Accuracy</th>
-                        </tr>
-                    </thead>
-                    <tbody id="t-body"></tbody>
-                </table>
-            </div>
-        `;
-        window.renderTeacherTable();
-    }
+            `;
+            window.renderTeacherTable();
+        }
 
-    navigateTo('login');
-</script>
+        navigateTo('login');
+    </script>
 </body>
 </html>
