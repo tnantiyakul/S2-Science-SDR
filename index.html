@@ -428,7 +428,9 @@
             if (GOOGLE_WEB_APP_URL === "PASTE_YOUR_LINK_HERE" || !GOOGLE_WEB_APP_URL.startsWith("http")) return safeStorage.get('hkuga_science_scores_t1');
             
             const now = Date.now();
-            if (!forceSync && window.cloudRecords && window.cloudRecords.length > 0 && (now - window.lastSyncTime < 60000)) {
+            if (!forceSync && window.cloudRecords && (now - window.lastSyncTime < 60000)) {
+                const statusEl = document.getElementById('cloud-sync-status');
+                if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-cloud-check text-green-400"></i> Cloud Synced`;
                 return window.cloudRecords;
             }
 
@@ -682,8 +684,8 @@
                 showLoader("Syncing Analytics Engine...");
                 state.user = { name: 'Teacher', classId: 'Staff', studentNum: '0', role: 'teacher', password: pwd }; 
                 await syncCloudData(true);
+                await navigateTo('teacher'); 
                 hideLoader();
-                navigateTo('teacher'); 
                 return;
             }
             
@@ -697,8 +699,8 @@
                 showLoader("Syncing with Secure Cloud...");
                 state.user = { name: name, classId: classId, studentNum: studentNum, role: 'student', password: pwd }; 
                 await syncCloudData(true);
+                await navigateTo('dashboard'); 
                 hideLoader();
-                navigateTo('dashboard'); 
                 return;
             }
             
@@ -717,8 +719,8 @@
                 if (data.status === 'success') {
                     state.user = { name: data.name, classId: classId, studentNum: studentNum, role: 'student', password: pwd };
                     await syncCloudData(true);
+                    await navigateTo('dashboard');
                     hideLoader();
-                    navigateTo('dashboard');
                 } else if (data.status === 'wrong_password') {
                     hideLoader();
                     errorEl.innerHTML = "<i class='fa-solid fa-lock mr-2'></i> Incorrect Password."; errorEl.classList.remove('hidden');
